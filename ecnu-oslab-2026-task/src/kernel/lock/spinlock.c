@@ -35,23 +35,39 @@ void pop_off(void)
 // 自选锁初始化
 void spinlock_init(spinlock_t *lk, char *name)
 {
-
+    lk->locked = 0;
+    lk->cpuid = 0;
+    lk->name = name;
 }
 
 // 是否持有自旋锁
 bool spinlock_holding(spinlock_t *lk)
 {
-
+    int r;
+    r = (lk->locked && lk->cpuid == mycpuid());
+    return r;
 }
 
 // 获取自选锁
 void spinlock_acquire(spinlock_t *lk)
 {
+    push_off();
+    assert(!spinlock_holding(lk), "acquire");
 
+    while(__sync_lock_test_and_set(&lk->locked, 1) != 0)
+        ;
+
+    __sync_synchronize();
+    lk->cpuid = mycpuid();
 }
 
 // 释放自旋锁
 void spinlock_release(spinlock_t *lk)
 {
+    assert(spinlock_holding(lk), "release");
 
+    lk->cpuid = 0;
+    __sync_synchronize();
+    __sync_lock_release(&lk->locked);
+    pop_off();
 }
