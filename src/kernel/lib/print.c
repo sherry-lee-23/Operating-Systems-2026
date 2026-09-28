@@ -59,7 +59,51 @@ static void printptr(uint64 x)
 */
 void printf(const char *fmt, ...)
 {
+    va_list ap;
 
+    va_start(ap, fmt);
+
+    spinlock_acquire(&print_lk);
+
+    for(int i = 0; fmt[i] != '\0'; i++){
+        if (fmt[i] != '%')
+            uart_putc_sync(fmt[i]);
+        else{
+            switch(fmt[++i]){
+                case 'd':{
+                    printint(va_arg(ap, int), 10, 1);
+                    break;
+                }
+        
+                case 'p':{
+                    printint(va_arg(ap, int), 16, 0);
+                    break;
+                }
+                    
+                case 'x':{
+                    printptr(va_arg(ap, int));
+                    break;
+                }
+                   
+                case 'c':{
+                    uart_putc_sync(va_arg(ap, int));
+                    break;
+                }
+                    
+                case 's':{
+                    char *s = va_arg(ap, char *);
+                    if(s == 0)
+                        s = "(null)";
+                    while (*s != '\0')
+                        uart_putc_sync(*s++);
+                    break;
+                }
+                    
+            }
+        }
+    }
+    spinlock_release(&print_lk);
+    va_end(ap);
 }
 
 
@@ -79,5 +123,5 @@ void panic(const char *s)
 /* 如果不满足条件, 则调用panic */
 void assert(bool condition, const char *warning)
 {
-
+    if(!condition) panic(warning);
 }
