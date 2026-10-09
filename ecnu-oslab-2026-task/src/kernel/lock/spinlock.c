@@ -36,7 +36,7 @@ void pop_off(void)
 void spinlock_init(spinlock_t *lk, char *name)
 {
     lk->locked = 0;
-    lk->cpuid = 0;
+    lk->cpuid = -1;
     lk->name = name;
 }
 
@@ -66,7 +66,7 @@ void spinlock_release(spinlock_t *lk)
 {
     assert(spinlock_holding(lk), "release");
 
-    lk->cpuid = 0;
+    lk->cpuid = -1;
     __sync_synchronize();
     __sync_lock_release(&lk->locked);
     pop_off();
