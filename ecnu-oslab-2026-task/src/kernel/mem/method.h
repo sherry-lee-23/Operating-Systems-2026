@@ -1,5 +1,7 @@
 #pragma once
 
+extern alloc_region_t kern_region, user_region;
+
 /* pmem.c: 物理内存管理逻辑 */
 
 void pmem_init(void);

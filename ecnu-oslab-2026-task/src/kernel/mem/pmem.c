@@ -1,7 +1,7 @@
 #include "mod.h"
 
 // 内核空间和用户空间的可分配物理页分开描述
-static alloc_region_t kern_region, user_region;
+alloc_region_t kern_region, user_region;
 
 // 物理内存的初始化
 // 本质上就是填写kern_region和user_region, 包括基本数值和空闲链表
@@ -64,7 +64,6 @@ void pmem_free(uint64 page, bool in_kernel)
 {
     alloc_region_t *region = in_kernel ? &kern_region : &user_region;
 
-    // 非法页直接 panic(静态检查不需要锁)
     if (page % PGSIZE != 0 ||
         page < region->begin ||
         page >= region->end) {
