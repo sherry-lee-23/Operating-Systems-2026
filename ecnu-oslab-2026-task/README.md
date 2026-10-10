@@ -1,6 +1,10 @@
-### Lab1
-![Test 4.1](image/image.png)
+### Lab2
 
-![Test 4.2](image/image2.png)
+test1   
+![alt text](pictures/image.png)
+![alt text](pictures/image-1.png)
 
-![Right Ans](image/image3.png)
+test2  
+![alt text](pictures/image-2.png)
+![alt text](pictures/image-4.png)
+![alt text](pictures/image-5.png)
