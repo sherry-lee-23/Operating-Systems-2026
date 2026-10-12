@@ -136,10 +136,11 @@ void timer_interrupt_handler()
 {
     // 由于sys_timer是共享资源, 但每个CPU都能收到时钟中断
     // 所以只需要指定一个CPU(CPU-0)负责更新时钟
-    if(mycpuid() == 0)
+    if(mycpuid() == 0){
         timer_update();
+        printf("ticks = %d\n", timer_get_ticks());
+    }
 
-    printf("cpu %d: di da\n", mycpuid());
     // 清除 SSIP bit (S-mode software interrupt pending)
     // 宣布 S-mode 软件中断处理完成
     // 在 trap.S 里面有对应的两条命令, 去找找
