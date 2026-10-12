@@ -15,7 +15,7 @@ void start()
     // 所以需要将hartid存到可访问的寄存器tp
     // 之后可以用mycpuid函数访问它
     int id = r_mhartid();
-    w_tp(id);
+    w_tp(id);//保存 hartid
 
     // 委托S-mode处理所有trap
     w_medeleg(0xffff);
