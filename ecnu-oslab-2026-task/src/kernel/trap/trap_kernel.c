@@ -138,7 +138,6 @@ void timer_interrupt_handler()
     // 所以只需要指定一个CPU(CPU-0)负责更新时钟
     if(mycpuid() == 0){
         timer_update();
-        printf("ticks = %d\n", timer_get_ticks());
     }
 
     // 清除 SSIP bit (S-mode software interrupt pending)
