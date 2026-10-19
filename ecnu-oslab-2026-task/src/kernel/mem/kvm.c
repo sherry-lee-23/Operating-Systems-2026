@@ -1,5 +1,9 @@
 #include "mod.h"
 
+// trampoline.S 中的跳板代码, 链接脚本将其放入 trampsec 段
+// 内核目前是直接映射, 因此该符号地址即为物理地址
+extern char trampoline[];
+
 // 内核页表
 static pgtbl_t kernel_pgtbl;
 
@@ -78,7 +82,30 @@ void vm_unmappages(pgtbl_t pgtbl, uint64 va, uint64 len, bool freeit)
 // 相当于部分填充kernel_pgtbl
 void kvm_init()
 {
+    kernel_pgtbl = (pgtbl_t)pmem_alloc(true);
 
+    // 硬件寄存器区(直接映射)
+    vm_mappages(kernel_pgtbl, UART_BASE,  UART_BASE,  0x1000UL,   PTE_R | PTE_W); // UART
+    vm_mappages(kernel_pgtbl, CLINT_BASE, CLINT_BASE, 0x10000UL,  PTE_R | PTE_W); // CLINT
+    vm_mappages(kernel_pgtbl, PLIC_BASE,  PLIC_BASE,  0x400000UL, PTE_R | PTE_W); // PLIC
+
+    // 内核代码区、数据区以及可分配区域(直接映射)
+    vm_mappages(kernel_pgtbl,
+                KERNEL_BASE, KERNEL_BASE,
+                128UL * 1024 * 1024,
+                PTE_R | PTE_W | PTE_X);
+
+    // 将跳板代码映射到用户虚拟地址空间顶部的 TRAMPOLINE 处
+    // 跳板只被 S-mode 执行, 不能设置 PTE_U
+    vm_mappages(kernel_pgtbl,
+                TRAMPOLINE, (uint64)trampoline,
+                PGSIZE, PTE_R | PTE_X);
+
+    // 为0号进程分配一页物理内存作为内核栈, 映射到 KSTACK(0)
+    void *kstack = pmem_alloc(true);
+    vm_mappages(kernel_pgtbl,
+                KSTACK(0), (uint64)kstack,
+                PGSIZE, PTE_R | PTE_W);
 }
 
 // 每个CPU都需要调用, 从不使用页表切换到使用内核页表

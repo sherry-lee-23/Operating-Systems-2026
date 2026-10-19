@@ -63,6 +63,9 @@ void trap_kernel_inithart()
     // 填写内核态中断处理函数
     w_stvec((uint64)kernel_vector);
 
+    // 打开 S-mode 中断分开关：软件中断(时钟) + 外部中断(串口)
+    w_sie(r_sie() | SIE_SSIE | SIE_SEIE);
+
     // 打开中断
     intr_on();
 }
@@ -87,6 +90,13 @@ void trap_kernel_handler()
         // 1-中断处理
         switch (trap_id) // 中断产生原因分类
         {
+            case 1:
+                // M-mode时钟中断会转发为S-mode软件中断
+                timer_interrupt_handler();
+                break;
+            case 9:
+                external_interrupt_handler();
+                break;
 
         default: // 例外处理
             printf("\nunexpected interrupt: %s\n", interrupt_info[trap_id]);

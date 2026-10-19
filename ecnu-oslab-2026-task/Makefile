@@ -13,17 +13,16 @@ KERNEL_LD  = kernel.ld
 # 定义内核目标文件路径
 ELFKernel = $(TARGET)/kernel/kernel-qemu.elf
 NakedKernel = $(TARGET)/kernel/kernel-qemu.bin
+# 用户程序裸二进制生成的数组头文件(供内核嵌入)
+ELFUser = $(UserPath)/initcode.h
 
 # 收集内核源代码文件（.c和.S汇编文件）
 KernelSourceFile = $(wildcard $(KernelPath)/*.c) $(wildcard $(KernelPath)/*.S)
 KernelSourceFile += $(wildcard $(KernelPath)/*/*.c) $(wildcard $(KernelPath)/*/*.S)
-# 收集用户态源代码文件
-UserSourceFile = $(wildcard $(UserPath)/*.c)
 
 # 生成目标文件（.o）路径列表
 KernelOBJ = $(patsubst $(KernelPath)/%.S, $(TARGET)/kernel/%.o, $(filter %.S, $(KernelSourceFile)))
 KernelOBJ += $(patsubst $(KernelPath)/%.c, $(TARGET)/kernel/%.o, $(filter %.c, $(KernelSourceFile)))
-UserOBJ = $(patsubst $(UserPath)/%.c, $(TARGET)/user/%.o, $(filter %.c, $(UserSourceFile)))
 
 # QEMU模拟器配置
 QEMU     = qemu-system-riscv64  # 指定QEMU程序
@@ -52,18 +51,17 @@ debug: $(KERN) .gdbinit
 # 构建目标：创建输出目录并编译内核
 build: $(TARGET) $(ELFKernel) 
 
-# 创建输出目录结构（如果不存在）
+# 创建输出目录结构
 .PHONY: $(TARGET)
 $(TARGET):
-ifeq ($(wildcard $(TARGET)),)
-	@mkdir -p $(TARGET)/kernel
 	@mkdir -p $(TARGET)/kernel/arch
 	@mkdir -p $(TARGET)/kernel/boot
 	@mkdir -p $(TARGET)/kernel/lock
 	@mkdir -p $(TARGET)/kernel/lib
 	@mkdir -p $(TARGET)/kernel/mem
+	@mkdir -p $(TARGET)/kernel/proc
 	@mkdir -p $(TARGET)/kernel/trap
-endif
+	@mkdir -p $(TARGET)/user
 
 # 编译规则：将汇编文件(.S)编译为目标文件(.o)
 $(TARGET)/kernel/%.o: $(KernelPath)/%.S
@@ -73,15 +71,26 @@ $(TARGET)/kernel/%.o: $(KernelPath)/%.S
 $(TARGET)/kernel/%.o: $(KernelPath)/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# 编译用户态程序
-$(TARGET)/user/%.o: $(UserPath)/%.c
+# 编译用户态程序(仅启动镜像initcode)
+$(TARGET)/user/initcode.o: $(UserPath)/initcode.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# 链接生成内核ELF文件
-$(ELFKernel): $(KernelOBJ) $(UserOBJ)
-	$(LD) $(LDFLAGS) -T $(KERNEL_LD) $^ -o $@
+# 链接出裸二进制用户镜像, 再用xxd生成内核可包含的数组
+# -Ttext 0 -e main: 用户程序链接到0地址, 入口是main
+$(ELFUser): $(TARGET)/user/initcode.o
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $(TARGET)/user/initcode.out $<
+	$(OBJCOPY) -S -O binary $(TARGET)/user/initcode.out $(TARGET)/user/initcode
+	xxd -i $(TARGET)/user/initcode > $@
 
-# 清理目标：删除输出目录
+# proc.c 包含了生成的initcode.h, 必须等它生成后再编译
+$(TARGET)/kernel/proc/proc.o: $(ELFUser)
+
+# 链接生成内核ELF文件
+$(ELFKernel): $(KernelOBJ) $(ELFUser)
+	$(LD) $(LDFLAGS) -T $(KERNEL_LD) $(KernelOBJ) -o $@
+
+# 清理目标：删除输出目录及生成的用户镜像头文件
 .PHONY: clean
 clean:
-	rm -rf target
+	rm -rf $(TARGET)
+	rm -f $(ELFUser)
