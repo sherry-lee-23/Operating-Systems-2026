@@ -122,3 +122,14 @@ typedef pte_t* pgtbl_t;
 
 // 定义一个非常大的VA, 正常来说所有VA不得大于它
 #define VA_MAX (1ul << 38)
+
+// 用户虚拟地址空间顶部的跳板页(trampoline.S中的代码)
+// 用户态发生trap时, stvec指向这里, 从而在切换页表前完成现场保存
+#define TRAMPOLINE (VA_MAX - PGSIZE)
+
+// 跳板页下方的一页, 用于保存用户进程的trapframe
+#define TRAPFRAME (TRAMPOLINE - PGSIZE)
+
+// 进程p的内核栈页的虚拟地址(紧邻trapframe下方)
+// 每个进程预留两页: 该页作为内核栈, 其下方一页不映射, 用作栈溢出的保护页
+#define KSTACK(p) (TRAMPOLINE - ((uint64)(p) + 1) * 2 * PGSIZE)
