@@ -1,7 +1,7 @@
 #include "mod.h"
 
 // 中断信息
-static char *interrupt_info[16] = {
+char *interrupt_info[16] = {
     "U-mode software interrupt",      // 0
     "S-mode software interrupt",      // 1
     "reserved-1",                     // 2
@@ -21,7 +21,7 @@ static char *interrupt_info[16] = {
 };
 
 // 异常信息
-static char *exception_info[16] = {
+char *exception_info[16] = {
     "Instruction address misaligned", // 0
     "Instruction access fault",       // 1
     "Illegal instruction",            // 2
@@ -63,9 +63,6 @@ void trap_kernel_inithart()
     // 填写内核态中断处理函数
     w_stvec((uint64)kernel_vector);
 
-    // 打开 S-mode 中断分开关：软件中断 + 外部中断
-    w_sie(r_sie() | SIE_SSIE | SIE_SEIE);
-
     // 打开中断
     intr_on();
 }
@@ -90,12 +87,6 @@ void trap_kernel_handler()
         // 1-中断处理
         switch (trap_id) // 中断产生原因分类
         {
-            case 1:
-                timer_interrupt_handler();
-                break;
-            case 9:
-                external_interrupt_handler();
-                break;
 
         default: // 例外处理
             printf("\nunexpected interrupt: %s\n", interrupt_info[trap_id]);
@@ -136,10 +127,8 @@ void timer_interrupt_handler()
 {
     // 由于sys_timer是共享资源, 但每个CPU都能收到时钟中断
     // 所以只需要指定一个CPU(CPU-0)负责更新时钟
-    if(mycpuid() == 0){
+    if(mycpuid() == 0)
         timer_update();
-    }
-
     // 清除 SSIP bit (S-mode software interrupt pending)
     // 宣布 S-mode 软件中断处理完成
     // 在 trap.S 里面有对应的两条命令, 去找找

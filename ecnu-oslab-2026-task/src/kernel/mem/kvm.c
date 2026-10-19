@@ -78,17 +78,6 @@ void vm_unmappages(pgtbl_t pgtbl, uint64 va, uint64 len, bool freeit)
 // 相当于部分填充kernel_pgtbl
 void kvm_init()
 {
-    kernel_pgtbl = (pgtbl_t)pmem_alloc(true);
-
-    // 硬件寄存器区(直接映射)
-    vm_mappages(kernel_pgtbl, UART_BASE,  UART_BASE,  0x1000UL,   PTE_R | PTE_W); // UART
-    vm_mappages(kernel_pgtbl, CLINT_BASE, CLINT_BASE, 0x10000UL,  PTE_R | PTE_W); // CLINT
-    vm_mappages(kernel_pgtbl, PLIC_BASE,  PLIC_BASE,  0x400000UL, PTE_R | PTE_W); // PLIC
-    
-    vm_mappages(kernel_pgtbl,
-                KERNEL_BASE, KERNEL_BASE,
-                128UL * 1024 * 1024,
-                PTE_R | PTE_W | PTE_X);
 
 }
 
