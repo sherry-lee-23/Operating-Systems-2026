@@ -53,6 +53,27 @@ void trap_user_handler()
 
         // 跳过引发异常的ecall指令
         tf->user_to_kern_epc += 4;
+    } else if (scause == 13 || scause == 15) {
+        // Load / Store-AMO Page Fault: 尝试自动扩展用户栈
+        uint64 stval = r_stval();
+        uint64 old_npage = p->ustack_npage;
+        uint64 new_npage;
+
+        printf("\npage fault: scause = %d, stval = %x, offset_from_trapframe = %x, ustack_npage = %d\n",
+               (int)scause, stval, TRAPFRAME - ALIGN_DOWN(stval, PGSIZE), (int)old_npage);
+
+        new_npage = uvm_ustack_grow(p->pgtbl, old_npage, stval);
+        if (new_npage == (uint64)-1)
+        {
+            printf("page fault: invalid stack fault address, cannot grow stack\n");
+            panic("trap_user_handler");
+        }
+
+        p->ustack_npage = new_npage;
+        printf("page fault handled: ustack_npage %d -> %d\n",
+               (int)old_npage, (int)new_npage);
+
+        // 不做 epc += 4: 返回用户态后需要重新执行引发缺页的指令
     } else {
         printf("\nunexpected exception: %s\n", exception_info[scause & 0xf]);
         printf("scause = %p, sepc = %p, stval = %p\n", scause, r_sepc(), r_stval());

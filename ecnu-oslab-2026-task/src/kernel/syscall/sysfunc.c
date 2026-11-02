@@ -79,7 +79,44 @@ uint64 sys_copyinstr()
 */
 uint64 sys_brk()
 {
-    return -1;
+    uint64 new_heap_top;
+    arg_uint64(0, &new_heap_top);
+
+    proc_t *p = myproc();
+
+    // 查询当前堆顶
+    if (new_heap_top == 0)
+    {
+        printf("sys_brk: query heap_top = %x, heap_base = %x\n", p->heap_top, p->heap_base);
+        return p->heap_top;
+    }
+
+    // 不能低于初始镜像保留边界, 也不能压到mmap区
+    if (new_heap_top < p->heap_base || new_heap_top > MMAP_BEGIN)
+    {
+        printf("sys_brk: invalid heap_top = %x (heap_base = %x, MMAP_BEGIN = %x)\n",
+               new_heap_top, p->heap_base, MMAP_BEGIN);
+        return (uint64)-1;
+    }
+
+    if (new_heap_top > p->heap_top)
+    {
+        p->heap_top = uvm_heap_grow(p->pgtbl, p->heap_top,
+                                    (uint32)(new_heap_top - p->heap_top));
+        printf("sys_brk: grow to %x (heap_base = %x)\n", p->heap_top, p->heap_base);
+    }
+    else if (new_heap_top < p->heap_top)
+    {
+        p->heap_top = uvm_heap_ungrow(p->pgtbl, p->heap_top,
+                                      (uint32)(p->heap_top - new_heap_top));
+        printf("sys_brk: shrink to %x (heap_base = %x)\n", p->heap_top, p->heap_base);
+    }
+    else
+    {
+        printf("sys_brk: unchanged heap_top = %x\n", p->heap_top);
+    }
+
+    return p->heap_top;
 }
 
 /*

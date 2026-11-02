@@ -76,6 +76,7 @@ typedef struct proc
 
     pgtbl_t pgtbl;       // 用户态页表
     uint64 heap_top;     // 用户堆顶(以字节为单位)
+    uint64 heap_base;    // 用户堆的初始边界(装入镜像末尾), brk 不得低于它
     uint64 ustack_npage; // 用户栈占用的页面数量
     mmap_region_t *mmap; // 用户态mmap区域
     trapframe_t *tf;     // 用户态内核态切换时的运行环境暂存空间

@@ -136,20 +136,60 @@ void uvm_munmap(uint64 begin, uint32 npages)
 // 用户堆空间增加, 返回新的堆顶地址 (注意栈顶最大值限制)
 uint64 uvm_heap_grow(pgtbl_t pgtbl, uint64 cur_heap_top, uint32 len) 
 {
-    return 0;
+    uint64 new_heap_top = cur_heap_top + len;
+
+    // 只映射新跨入的整页, 已映射的页保持不动
+    uint64 begin = ALIGN_UP(cur_heap_top, PGSIZE);
+    uint64 end = ALIGN_UP(new_heap_top, PGSIZE);
+
+    for (uint64 va = begin; va < end; va += PGSIZE)
+    {
+        void *page = pmem_alloc(false);
+        vm_mappages(pgtbl, va, (uint64)page, PGSIZE, PTE_R | PTE_W | PTE_U);
+    }
+
+    return new_heap_top;
 }
 
 // 用户堆空间减少, 返回新的堆顶地址
 uint64 uvm_heap_ungrow(pgtbl_t pgtbl, uint64 cur_heap_top, uint32 len)
 {
-    return 0;
+    uint64 new_heap_top = cur_heap_top - len;
+
+    // new_heap_top 所在的那一页仍被使用, 从它的下一页开始释放
+    uint64 begin = ALIGN_UP(new_heap_top, PGSIZE);
+    uint64 end = ALIGN_UP(cur_heap_top, PGSIZE);
+
+    for (uint64 va = begin; va < end; va += PGSIZE)
+        vm_unmappages(pgtbl, va, PGSIZE, true);
+
+    return new_heap_top;
 }
 
 // 处理函数栈增长导致的page fault事件
 // 成功返回new_ustack_npage，失败返回-1
 uint64 uvm_ustack_grow(pgtbl_t pgtbl, uint64 old_ustack_npage, uint64 fault_addr)
 {
-    return (uint64)-1;
+    uint64 fault_page = ALIGN_DOWN(fault_addr, PGSIZE);
+    uint64 stack_bottom = TRAPFRAME - old_ustack_npage * PGSIZE;
+
+    // 只接受向下增长, 且不能越过mmap区上界
+    if (fault_page < MMAP_END || fault_page >= stack_bottom)
+        return (uint64)-1;
+
+    // 一次缺页可能跨多页: 补齐[当前栈底 - PGSIZE, fault_page]之间的全部页
+    uint64 npage = old_ustack_npage;
+    for (uint64 va = stack_bottom - PGSIZE;; va -= PGSIZE)
+    {
+        void *page = pmem_alloc(false);
+        vm_mappages(pgtbl, va, (uint64)page, PGSIZE, PTE_R | PTE_W | PTE_U);
+        npage++;
+
+        if (va <= fault_page)
+            break;
+    }
+
+    return npage;
 }
 
 /*----------------------part-4: 用户页表管理相关----------------------*/

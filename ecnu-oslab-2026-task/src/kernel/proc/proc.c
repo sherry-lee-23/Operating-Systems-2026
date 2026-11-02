@@ -79,7 +79,9 @@ void proc_make_first()
                 PGSIZE, PTE_R | PTE_W | PTE_X | PTE_U);
 
     // 堆从代码段之后的地址开始向上增长
-    p->heap_top = PGSIZE;
+    // heap_base 由实际装入的镜像末尾(按页向上对齐)决定, 是 brk 不可跌破的边界
+    p->heap_base = ALIGN_UP(initcode_len, PGSIZE);
+    p->heap_top = p->heap_base;
 
     // 用户态初始现场
     p->tf->user_to_kern_epc = 0;     // 用户程序从0地址开始执行
