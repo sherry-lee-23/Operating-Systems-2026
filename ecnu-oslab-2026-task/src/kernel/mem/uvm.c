@@ -367,20 +367,55 @@ uint64 uvm_ustack_grow(pgtbl_t pgtbl, uint64 old_ustack_npage, uint64 fault_addr
 // ps: 顶级页表level = 3
 static void destroy_pgtbl(pgtbl_t pgtbl, uint32 level)
 {
+    for (int i = 0; i < (int)(PGSIZE / sizeof(pte_t)); i++)
+    {
+        pte_t pte = pgtbl[i];
+        if (!(pte & PTE_V))
+            continue;
 
+        uint64 pa = PTE_TO_PA(pte);
+
+        if (level == 1)
+        {
+            // 最低级页表项指向叶子页: 释放用户物理页
+            pmem_free(pa, false);
+        }
+        else
+        {
+            // 中间级页表页: 先递归释放其管理的内容, 再释放该页表页本身
+            destroy_pgtbl((pgtbl_t)pa, level - 1);
+            pmem_free(pa, true);
+        }
+        pgtbl[i] = 0;
+    }
 }
 
 // 页表销毁
 void uvm_destroy_pgtbl(pgtbl_t pgtbl)
 {
-    vm_unmappages(pgtbl, TRAPFRAME, PGSIZE, true);   // 可以释放，因为trapframe是每个进程独有的
-    vm_unmappages(pgtbl, TRAMPOLINE, PGSIZE, false); // 不能释放，因为所有进程共用区域
+    // trapframe 是每个进程独有的页, 但它从内核物理区申请, 必须按内核页释放
+    pte_t *tf = vm_getpte(pgtbl, TRAPFRAME, false);
+    if (tf != 0 && (*tf & PTE_V))
+    {
+        pmem_free(PTE_TO_PA(*tf), true);
+        *tf = 0;
+    }
+
+    // trampoline 与所有进程共享(且位于内核镜像中), 只解除映射, 绝不释放物理页
+    pte_t *tr = vm_getpte(pgtbl, TRAMPOLINE, false);
+    if (tr != 0 && (*tr & PTE_V))
+        *tr = 0;
+
+    // 释放全部用户页与中间级页表页
     destroy_pgtbl(pgtbl, 3);
+
+    // 最后释放根页表页
+    pmem_free((uint64)pgtbl, true);
 }
 
 // 连续虚拟空间的复制
 // 在uvm_copy_pgtbl中使用
-static __attribute__((unused)) void copy_range(pgtbl_t old, pgtbl_t new, uint64 begin, uint64 end)
+static void copy_range(pgtbl_t old, pgtbl_t new, uint64 begin, uint64 end)
 {
     uint64 va, pa, page;
     int flags;
@@ -401,9 +436,43 @@ static __attribute__((unused)) void copy_range(pgtbl_t old, pgtbl_t new, uint64 
     }
 }
 
+// 递归遍历用户页表, 逐页复制除 TRAPFRAME / TRAMPOLINE 之外的映射
+// level: 2=顶级, 1=次级, 0=低级(其表项即叶子页)
+static void copy_user_pages(pte_t *old_tbl, pgtbl_t old, pgtbl_t new, int level, uint64 va_base)
+{
+    for (int i = 0; i < (int)(PGSIZE / sizeof(pte_t)); i++)
+    {
+        pte_t pte = old_tbl[i];
+        if (!(pte & PTE_V))
+            continue;
+
+        uint64 va = va_base + ((uint64)(uint32)i << VA_SHIFT(level));
+
+        if (PTE_CHECK(pte))
+        {
+            // 非叶子页表项: 递归到下一级
+            assert(level > 0, "copy_user_pages: invalid pgtbl");
+            copy_user_pages((pte_t *)PTE_TO_PA(pte), old, new, level - 1, va);
+            continue;
+        }
+
+        // trapframe 每进程私有、trampoline 共享, 均由进程初始化时准备, 不在此复制
+        if (va == TRAPFRAME || va == TRAMPOLINE)
+            continue;
+
+        copy_range(old, new, va, va + PGSIZE);
+    }
+}
+
 // 拷贝页表 (拷贝并不包括 trapframe 和 trampoline)
 // 拷贝的页表管理的物理页是原来页表的复制品
 void uvm_copy_pgtbl(pgtbl_t old, pgtbl_t new, uint64 heap_top, uint64 ustack_npage, mmap_region_t *mmap)
 {
+    // 代码/堆/栈/mmap 页都已映射在用户页表中, 直接按页表遍历复制即可;
+    // heap_top / ustack_npage / mmap 等元数据由调用者在新的 proc_t 中维护
+    (void)heap_top;
+    (void)ustack_npage;
+    (void)mmap;
 
+    copy_user_pages((pte_t *)old, old, new, 2, 0);
 }
