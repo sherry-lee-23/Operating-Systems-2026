@@ -44,11 +44,11 @@ void trap_user_handler()
         uint64 num = tf->a7;
 
         if (num == SYS_helloworld) {
+            // SYS_helloworld 未登记在 syscall 跳转表中(编号0), 保留为 Lab4 兼容分支
             printf("proczero: hello world\n");
             tf->a0 = 0;
         } else {
-            printf("unknown syscall: %d\n", (int)num);
-            tf->a0 = -1;
+            syscall();
         }
 
         // 跳过引发异常的ecall指令

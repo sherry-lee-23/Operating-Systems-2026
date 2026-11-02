@@ -2,8 +2,11 @@
 
 int main()
 {
-    syscall(SYS_helloworld);
-    syscall(SYS_helloworld);
+    int L[5];
+    char *s = "hello, world";
+    syscall(SYS_copyout, L);
+    syscall(SYS_copyin, L, 5);
+    syscall(SYS_copyinstr, s);
     while (1)
         ;
     return 0;

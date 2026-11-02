@@ -1,5 +1,8 @@
 #include "mod.h"
 
+/* 测试用: sys_copyin 允许一次接收的最大元素数 */
+#define SYS_COPYIN_MAX 64
+
 /*
     测试: 从用户空间传入一个int类型的数组
     uint64 addr 数组起始地址
@@ -8,6 +11,25 @@
 */
 uint64 sys_copyin()
 {
+    uint64 addr;
+    uint32 len;
+    arg_uint64(0, &addr);
+    arg_uint32(1, &len);
+
+    if (len > SYS_COPYIN_MAX) {
+        printf("sys_copyin: too many elements (%d)\n", (int)len);
+        return (uint64)-1;
+    }
+
+    int kbuf[SYS_COPYIN_MAX];
+    proc_t *p = myproc();
+    uvm_copyin(p->pgtbl, (uint64)kbuf, addr, len * sizeof(int));
+
+    printf("sys_copyin: ");
+    for (uint32 i = 0; i < len; i++)
+        printf("%d ", kbuf[i]);
+    printf("\n");
+
     return 0;
 }
 
@@ -18,7 +40,14 @@ uint64 sys_copyin()
 */
 uint64 sys_copyout()
 {
-	return 0;
+    uint64 addr;
+    arg_uint64(0, &addr);
+
+    int kbuf[5] = {1, 2, 3, 4, 5};
+    proc_t *p = myproc();
+    uvm_copyout(p->pgtbl, addr, (uint64)kbuf, sizeof(kbuf));
+
+    return 5;
 }
 
 /*
@@ -28,6 +57,18 @@ uint64 sys_copyout()
 */
 uint64 sys_copyinstr()
 {
+    uint64 addr;
+    arg_uint64(0, &addr);
+
+    // uvm_copyin_str 最多写 maxlen 字节且不补写 buf[maxlen],
+    // 因此留一个字节由调用方补终止符
+    char buf[STR_MAXLEN + 1];
+    proc_t *p = myproc();
+    uvm_copyin_str(p->pgtbl, (uint64)buf, addr, STR_MAXLEN);
+    buf[STR_MAXLEN] = 0;
+
+    printf("sys_copyinstr: %s\n", buf);
+
     return 0;
 }
 
