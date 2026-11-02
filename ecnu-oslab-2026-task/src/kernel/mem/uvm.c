@@ -89,7 +89,7 @@ void uvm_show_mmaplist(mmap_region_t *mmap)
 // 两个 mmap_region 区域合并
 // 注意: 保留一个 释放一个 不操作 next 指针
 // 由uvm_mmap调用
-static __attribute__((unused)) void mmap_merge(mmap_region_t *mmap_1, mmap_region_t *mmap_2, bool keep_mmap_1)
+static void mmap_merge(mmap_region_t *mmap_1, mmap_region_t *mmap_2, bool keep_mmap_1)
 {
     // 确保有效和紧临
     assert(mmap_1 != NULL && mmap_2 != NULL, "mmap_merge: NULL");
@@ -106,21 +106,114 @@ static __attribute__((unused)) void mmap_merge(mmap_region_t *mmap_1, mmap_regio
     }
 }
 
-// 寻找一块足够大的区域(len), 作为 mmap_region
+// 寻找一块足够大的区域(len字节), 作为 mmap_region
 // 由uvm_mmap调用(处理begin==0的情况)
-// 成功返回begin, 失败返回0
-static __attribute__((unused)) uint64 uvm_mmap_find(mmap_region_t *head_mmap, uint64 len, mmap_region_t **p_last_mmap, mmap_region_t **p_tmp_mmap)
+// 成功返回begin, 并通过输出参数返回该空洞的前驱/后继节点; 失败返回0
+static uint64 uvm_mmap_find(mmap_region_t *head_mmap, uint64 len, mmap_region_t **p_last_mmap, mmap_region_t **p_tmp_mmap)
 {
+    // 从MMAP_BEGIN开始扫描: 头/中/尾三种空洞统一按"已用区间上界"推进
+    uint64 gap_begin = MMAP_BEGIN;
+    mmap_region_t *last = NULL;
+    mmap_region_t *cur = head_mmap;
+
+    while (cur != NULL)
+    {
+        uint64 cur_begin = cur->begin;
+
+        if (cur_begin - gap_begin >= len)
+        {
+            *p_last_mmap = last;
+            *p_tmp_mmap = cur;
+            return gap_begin;
+        }
+
+        gap_begin = cur_begin + (uint64)cur->npages * PGSIZE;
+        last = cur;
+        cur = cur->next;
+    }
+
+    // 尾空洞
+    if (MMAP_END - gap_begin >= len)
+    {
+        *p_last_mmap = last;
+        *p_tmp_mmap = NULL;
+        return gap_begin;
+    }
+
     return 0;
 }
 
 // 在用户页表和进程mmap链里新增mmap区域 [begin, begin + npages * PGSIZE)
 // 调用者保证begin是page-aligned的, 页面权限为perm
 // 注意: 如果start==0, 意味着需要内核自主找一块足够大的空间
-// 失败则panic卡死
-void uvm_mmap(uint64 begin, uint32 npages, int perm)
+// 成功返回实际映射起始地址, 失败返回(uint64)-1
+uint64 uvm_mmap(uint64 begin, uint32 npages, int perm)
 {
+    proc_t *p = myproc();
+    uint64 len = (uint64)npages * PGSIZE;
+    mmap_region_t *last = NULL, *next = NULL;
 
+    if (npages == 0)
+        return (uint64)-1;
+
+    if (begin == 0)
+    {
+        // 自动选址: 取第一个足够大的空洞
+        begin = uvm_mmap_find(p->mmap, len, &last, &next);
+        if (begin == 0)
+            return (uint64)-1;
+    }
+    else
+    {
+        if (begin % PGSIZE != 0 || begin < MMAP_BEGIN || begin + len > MMAP_END)
+            return (uint64)-1;
+
+        // 定位插入点, 同时拒绝与已有区域重叠的请求
+        next = p->mmap;
+        while (next != NULL && next->begin < begin)
+        {
+            last = next;
+            next = next->next;
+        }
+        if ((last != NULL && last->begin + (uint64)last->npages * PGSIZE > begin) ||
+            (next != NULL && begin + len > next->begin))
+            return (uint64)-1;
+    }
+
+    mmap_region_t *node = mmap_region_alloc();
+    if (node == NULL)
+        panic("uvm_mmap: no mmap_region_node");
+
+    // 只为本次新增的区间建立映射, 相邻的已映射页不重复处理
+    for (uint32 i = 0; i < npages; i++)
+    {
+        void *page = pmem_alloc(false);
+        vm_mappages(p->pgtbl, begin + (uint64)i * PGSIZE, (uint64)page, PGSIZE, perm | PTE_U);
+    }
+
+    node->begin = begin;
+    node->npages = npages;
+    node->next = next;
+    if (last == NULL)
+        p->mmap = node;
+    else
+        last->next = node;
+
+    // 与后继相邻: 合并进本节点, 回收后继
+    if (next != NULL && begin + len == next->begin)
+    {
+        node->next = next->next;
+        mmap_merge(node, next, true);
+    }
+
+    // 与前驱相邻: 合并进前驱, 回收本节点
+    if (last != NULL && last->begin + (uint64)last->npages * PGSIZE == node->begin)
+    {
+        last->next = node->next;
+        mmap_merge(last, node, true);
+    }
+
+    return begin;
 }
 
 
@@ -128,7 +221,83 @@ void uvm_mmap(uint64 begin, uint32 npages, int perm)
 // 失败则panic卡死
 void uvm_munmap(uint64 begin, uint32 npages)
 {
+    if (npages == 0 || begin % PGSIZE != 0)
+        panic("uvm_munmap: invalid range");
 
+    proc_t *p = myproc();
+    uint64 end = begin + (uint64)npages * PGSIZE;
+
+    if (begin < MMAP_BEGIN || end > MMAP_END)
+        panic("uvm_munmap: out of mmap area");
+
+    mmap_region_t *prev = NULL;
+    mmap_region_t *cur = p->mmap;
+
+    while (cur != NULL)
+    {
+        uint64 cur_begin = cur->begin;
+        uint64 cur_end = cur_begin + (uint64)cur->npages * PGSIZE;
+
+        if (cur_end <= begin || cur_begin >= end)
+        {
+            prev = cur;
+            cur = cur->next;
+            continue;
+        }
+
+        // 本节点与解除区间有交集, 真正解除的是交集部分
+        uint64 lo = MAX(cur_begin, begin);
+        uint64 hi = MIN(cur_end, end);
+        bool cut_left = (cur_begin < lo);
+        bool cut_right = (hi < cur_end);
+
+        vm_unmappages(p->pgtbl, lo, hi - lo, true);
+
+        if (!cut_left && !cut_right)
+        {
+            // 整段删除
+            if (prev == NULL)
+                p->mmap = cur->next;
+            else
+                prev->next = cur->next;
+
+            mmap_region_t *old = cur;
+            cur = cur->next;
+            mmap_region_free(old);
+        }
+        else if (!cut_left)
+        {
+            // 只保留右半
+            cur->begin = hi;
+            cur->npages = (uint32)((cur_end - hi) / PGSIZE);
+            prev = cur;
+            cur = cur->next;
+        }
+        else if (!cut_right)
+        {
+            // 只保留左半
+            cur->npages = (uint32)((lo - cur_begin) / PGSIZE);
+            prev = cur;
+            cur = cur->next;
+        }
+        else
+        {
+            // 中间挖洞: 拆成左右两个节点
+            mmap_region_t *right = mmap_region_alloc();
+            if (right == NULL)
+                panic("uvm_munmap: no mmap_region_node");
+
+            right->begin = hi;
+            right->npages = (uint32)((cur_end - hi) / PGSIZE);
+            right->next = cur->next;
+
+            cur->npages = (uint32)((lo - cur_begin) / PGSIZE);
+            cur->next = right;
+
+            prev = right;
+            cur = right->next;
+        }
+    }
 }
 
 /*------------------part-3: 用户空间heap和stack管理相关------------------*/

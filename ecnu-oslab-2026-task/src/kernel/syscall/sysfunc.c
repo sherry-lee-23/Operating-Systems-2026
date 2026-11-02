@@ -127,7 +127,54 @@ uint64 sys_brk()
 */
 uint64 sys_mmap()
 {
-    return 0;
+    uint64 begin, len;
+    arg_uint64(0, &begin);
+    arg_uint64(1, &len);
+
+    if (len == 0 || len % PGSIZE != 0)
+    {
+        printf("sys_mmap: invalid len = %x\n", len);
+        return (uint64)-1;
+    }
+
+    proc_t *p = myproc();
+
+    if (begin != 0)
+    {
+        uint64 end = begin + len;
+        if (begin % PGSIZE != 0 || begin < MMAP_BEGIN || end > MMAP_END)
+        {
+            printf("sys_mmap: invalid range, begin = %x, len = %x\n", begin, len);
+            return (uint64)-1;
+        }
+        // 与已分配区域重叠则拒绝, 避免重复建PTE与后续double free
+        for (mmap_region_t *m = p->mmap; m != NULL; m = m->next)
+        {
+            uint64 m_begin = m->begin;
+            uint64 m_end = m_begin + (uint64)m->npages * PGSIZE;
+            if (begin < m_end && m_begin < end)
+            {
+                printf("sys_mmap: overlap with [%x, %x)\n", m_begin, m_end);
+                return (uint64)-1;
+            }
+        }
+    }
+
+    uint32 npages = (uint32)(len / PGSIZE);
+    uint64 start = uvm_mmap(begin, npages, PTE_R | PTE_W);
+
+    printf("\nsys_mmap: begin = %x, npages = %d, ret = %x\n", begin, (int)npages, start);
+    if (start == (uint64)-1)
+    {
+        printf("sys_mmap: failed\n");
+        return (uint64)-1;
+    }
+
+    uvm_show_mmaplist(p->mmap);
+    vm_print(p->pgtbl);
+    printf("\n");
+
+    return start;
 }
 
 /*
@@ -138,5 +185,25 @@ uint64 sys_mmap()
 */
 uint64 sys_munmap()
 {
+    uint64 begin, len;
+    arg_uint64(0, &begin);
+    arg_uint64(1, &len);
+
+    if (len == 0 || len % PGSIZE != 0 || begin % PGSIZE != 0 ||
+        begin < MMAP_BEGIN || begin + len > MMAP_END)
+    {
+        printf("sys_munmap: invalid range, begin = %x, len = %x\n", begin, len);
+        return (uint64)-1;
+    }
+
+    uint32 npages = (uint32)(len / PGSIZE);
+    printf("\nsys_munmap: begin = %x, npages = %d\n", begin, (int)npages);
+    uvm_munmap(begin, npages);
+
+    proc_t *p = myproc();
+    uvm_show_mmaplist(p->mmap);
+    vm_print(p->pgtbl);
+    printf("\n");
+
     return 0;
 }

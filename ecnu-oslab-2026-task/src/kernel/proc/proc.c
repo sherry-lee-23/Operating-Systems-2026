@@ -83,6 +83,9 @@ void proc_make_first()
     p->heap_base = ALIGN_UP(initcode_len, PGSIZE);
     p->heap_top = p->heap_base;
 
+    // 尚未建立任何mmap区域
+    p->mmap = NULL;
+
     // 用户态初始现场
     p->tf->user_to_kern_epc = 0;     // 用户程序从0地址开始执行
     p->tf->sp = TRAPFRAME;           // 用户栈顶

@@ -21,6 +21,9 @@ void main()
 
         trap_kernel_init(); // 全局：PLIC + timer_create
 
+        // mmap_region_node 仓库只需初始化一次, 且必须早于任何节点申请
+        mmap_init();
+
         __sync_synchronize();
         boot_ready = 1;
     } else {
